@@ -1,3 +1,4 @@
+```
 project-root/
 │
 ├── app/                          # Main app code
@@ -25,7 +26,7 @@ project-root/
 ├── .gitignore                    # Git ignore file
 ├── requirements.txt              # Dependencies
 └── README.md                     # Project documentation
-
+```
 
 # Emergency Services Locator API
 
