@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import List, Optional
 
 class Service(BaseModel):
     """
@@ -24,6 +24,6 @@ class UserQuery(BaseModel):
     query: str
     latitude: Optional[float] = None
     longitude: Optional[float] = None
-    service_type: Optional[str] = None
+    service_type: Optional[List[str]] = None
     location_mentioned: Optional[str] = None
     urgency: Optional[str] = "Medium"

@@ -61,7 +61,7 @@ async def list_service_types():
 @router.post("/get_help/")
 async def get_help(user_query: UserQuery = Body(...)):
     """
-    Find nearby services based on user query and location
+    Find nearby services based on user query and location and multiple service types
     """
     query = user_query.query
     user_lat = user_query.latitude
@@ -73,20 +73,23 @@ async def get_help(user_query: UserQuery = Body(...)):
     if user_lat is None or user_lon is None:
         raise HTTPException(status_code=400, detail="Location coordinates are required")
 
-    # If service type not provided, extract from query
+    # If service types not provided, extract from query
     if not user_query.service_type:
         mentioned_location, inferred_type = extract_location_and_service(query)
         best_type = await get_best_matching_service_type(inferred_type or query)
-        user_query.service_type = best_type or "unknown"
+        user_query.service_type = [best_type] if best_type else ["unknown"]
         user_query.location_mentioned = mentioned_location
+    elif isinstance(user_query.service_type, str):
+        # Handle case where a single string is passed instead of a list
+        user_query.service_type = [user_query.service_type]
 
     analysis = {
-        'service_type': user_query.service_type or 'unknown',
+        'service_types': user_query.service_type or ['unknown'],
         'location_mentioned': user_query.location_mentioned,
         'urgency': user_query.urgency or 'Medium'
     }
 
-    service_type = analysis.get("service_type", "unknown")
+    service_types = analysis.get("service_types", ["unknown"])
     mentioned_location = analysis.get("location_mentioned")
     urgency = analysis.get("urgency", "Medium")
     
@@ -107,21 +110,14 @@ async def get_help(user_query: UserQuery = Body(...)):
     # Get nearby services
     results = await search_nearby(target_lat, target_lon, top_k=100)
 
-    print("User Service Type:", user_query.service_type)
-    # for r in results:
-    #     print("Result Type:", r.get('type', ''))
-    
-    type_filtered = [
-        r for r in results 
-        if r.get('type', '').strip().lower() == user_query.service_type.strip().lower()
-    ]
-
-    # from rapidfuzz import fuzz
-
-    # type_filtered = [
-    #     r for r in results 
-    #     if fuzz.partial_ratio(user_query.service_type.lower(), r.get('type', '').lower()) > 80
-    # ]
+    # Filter by multiple service types
+    type_filtered = []
+    for result in results:
+        result_type = result.get('type', '').strip().lower()
+        for service_type in service_types:
+            if result_type == service_type.strip().lower():
+                type_filtered.append(result)
+                break
 
     # Set radius based on urgency
     radius_km = settings.DEFAULT_SEARCH_RADIUS_KM
@@ -142,14 +138,14 @@ async def get_help(user_query: UserQuery = Body(...)):
     if len(filtered) == 0:
         return {
             "original_query": query,
-            "understood_service": service_type,
+            "understood_services": service_types,
             "target_location": location_name,
             "target_coordinates": [target_lat, target_lon],
             "user_coordinates": [user_lat, user_lon],
             "urgency": urgency,
             "radius_km": radius_km,
             "nearby_services": [],
-            "message": f"No {service_type} services found within {radius_km}km of the target location. Try increasing the search radius or selecting a different service type."
+            "message": f"No services of types {', '.join(service_types)} found within {radius_km}km of the target location. Try increasing the search radius or selecting different service types."
         }
     
     # Calculate distances for results
@@ -164,7 +160,7 @@ async def get_help(user_query: UserQuery = Body(...)):
     
     return {
         "original_query": query,
-        "understood_service": service_type,
+        "understood_services": service_types,
         "target_location": location_name,
         "target_coordinates": [target_lat, target_lon],
         "user_coordinates": [user_lat, user_lon],
