@@ -1,7 +1,7 @@
 import uuid
 from typing import List, Tuple
 
-from sqlalchemy import Column, String, Float, Boolean, Text, select, func
+from sqlalchemy import Column, String, Float, Boolean, Text, select, func, distinct
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -164,22 +164,18 @@ async def get_all_services(skip: int = 0, limit: int = 100, service_type: str = 
         return services, total_count
 
 
-async def get_service_types():
+async def get_service_types() -> List[str]:
     """
-    Retrieve all unique service types from the database
-    
+    Retrieve all unique service types from the database.
+
     Returns:
-        List of distinct service type strings
+        List of distinct service type strings.
     """
     async with AsyncSessionLocal() as session:
-        from sqlalchemy import distinct
         stmt = select(distinct(ServiceDB.type)).order_by(ServiceDB.type)
-        results = (await session.execute(stmt)).scalars().all()
-        
-        # Convert results to a list of strings
-        service_types = list(results)
-        
-        return service_types
+        result = await session.execute(stmt)
+        service_types = result.scalars().all()
+        return [stype for stype in service_types if stype]  # remove None/nulls if any
 
 
 async def init_db():

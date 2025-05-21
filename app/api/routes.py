@@ -2,6 +2,7 @@ import requests
 from fastapi import APIRouter, UploadFile, File, Query, HTTPException, Body
 from geopy.distance import geodesic
 from typing import Dict, Any, Optional, List
+from rapidfuzz import process, fuzz
 
 from app.db.postgres import insert_services, search_nearby, get_all_services, get_service_types
 from app.utils.common import parse_csv, extract_location_and_service
@@ -74,8 +75,9 @@ async def get_help(user_query: UserQuery = Body(...)):
 
     # If service type not provided, extract from query
     if not user_query.service_type:
-        mentioned_location, service_type = extract_location_and_service(query)
-        user_query.service_type = service_type
+        mentioned_location, inferred_type = extract_location_and_service(query)
+        best_type = await get_best_matching_service_type(inferred_type or query)
+        user_query.service_type = best_type or "unknown"
         user_query.location_mentioned = mentioned_location
 
     analysis = {
@@ -104,44 +106,22 @@ async def get_help(user_query: UserQuery = Body(...)):
     
     # Get nearby services
     results = await search_nearby(target_lat, target_lon, top_k=100)
+
+    print("User Service Type:", user_query.service_type)
+    # for r in results:
+    #     print("Result Type:", r.get('type', ''))
     
-    # Filter by service type if provided
-    if service_type and service_type != "unknown":
-        service_keywords = {
-            "hospital": ["hospital", "medical", "healthcare", "clinic", "emergency"],
-            "doctor": ["doctor", "physician", "medical", "clinic", "healthcare"],
-            "ambulance": ["ambulance", "emergency", "medical transport"],
-            "automobile": ["automobile", "car", "mechanic", "garage", "vehicle", "repair", "auto"],
-            "pharmacy": ["pharmacy", "medicine", "medical", "chemist", "drug store"],
-            "food": ["food", "restaurant", "cafe", "catering", "meal", "hotel"],
-            "police": ["police", "security", "law enforcement", "thief"],
-            "fire": ["fire", "firefighter", "emergency", "fire extinguisher"],
-        }
-        
-        matching_keywords = []
-        for category, keywords in service_keywords.items():
-            if any(keyword.lower() in service_type.lower() for keyword in [category] + keywords):
-                matching_keywords.extend(keywords)
-                matching_keywords.append(category)
-        
-        if matching_keywords:
-            type_filtered = [
-                r for r in results 
-                if any(keyword.lower() in r.get('type', '').lower() for keyword in matching_keywords)
-            ]
-        else:
-            type_filtered = [
-                r for r in results 
-                if service_type.lower() in r.get('type', '').lower()
-            ]
-        
-        if not type_filtered and service_type != "unknown":
-            type_filtered = [
-                r for r in results 
-                if service_type.lower() in r.get('type', '').lower()
-            ]
-    else:
-        type_filtered = results
+    type_filtered = [
+        r for r in results 
+        if r.get('type', '').strip().lower() == user_query.service_type.strip().lower()
+    ]
+
+    # from rapidfuzz import fuzz
+
+    # type_filtered = [
+    #     r for r in results 
+    #     if fuzz.partial_ratio(user_query.service_type.lower(), r.get('type', '').lower()) > 80
+    # ]
 
     # Set radius based on urgency
     radius_km = settings.DEFAULT_SEARCH_RADIUS_KM
@@ -192,3 +172,14 @@ async def get_help(user_query: UserQuery = Body(...)):
         "radius_km": radius_km,
         "nearby_services": filtered
     }
+
+async def get_best_matching_service_type(user_input: str) -> Optional[str]:
+    all_service_types = await get_service_types()
+    if not all_service_types:
+        return None
+    best_match, score, _ = process.extractOne(
+        query=user_input.lower(),
+        choices=[stype.lower() for stype in all_service_types],
+        scorer=fuzz.token_sort_ratio
+    )
+    return best_match if score > 60 else None  # adjust threshold if needed
